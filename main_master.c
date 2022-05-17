@@ -18,6 +18,7 @@ struct Client {
     char ID;
     char connected;
     char ack;
+    char time_diff_flag;
     long round_time;
     uint32_t time_diff;
 };
@@ -34,9 +35,9 @@ void playAudio() {
 
 int main() {
 
-    struct Client c1 = {0x01, 0x00, 0x00, 0x00, 0x00};
-    struct Client c2 = {0x02, 0x00, 0x00, 0x00, 0x00};
-    struct Client c3 = {0x03, 0x00, 0x00, 0x00, 0x00};
+    struct Client clientlist[CLIENTCNT] = { {0x01, 0x00, 0x00, 0x00, 0x00, 0x00},
+                                            {0x02, 0x00, 0x00, 0x00, 0x00, 0x00},
+                                            {0x03, 0x00, 0x00, 0x00, 0x00, 0x00} };
 
     // Init GPIO
     if(wiringPiSetup() == -1) {
@@ -75,7 +76,7 @@ int main() {
     #if !DEBUG
 
         // Wait for all 3 clients to connect & say hello
-        while(c1.connected == 0x00)// || client_list[1][1] == 0x00 || client_list[2][1] == 0x00) // TODO: uncomment
+        while(clientlist[0].connected == 0x00)// || client_list[1][1] == 0x00 || client_list[2][1] == 0x00) // TODO: uncomment
         {
             n = recvfrom(sockfd, (char *)buffer, REC_BUFF_SIZE, MSG_WAITALL, ( struct sockaddr *) &cliaddr, &len);
 
@@ -85,14 +86,10 @@ int main() {
             }
             printf("\n");
 
-            if (buffer[0] == (c1.ID << 4 | 0x01)) {
-                c1.connected = 0x01;
-            }
-            else if (buffer[0] == (c2.ID << 4 | 0x01)) {
-                c2.connected = 0x01;
-            }
-            else if (buffer[0] == (c3.ID << 4 | 0x01)) {
-                c3.connected = 0x01;
+            for (int i = 0; i < CLIENTCNT; i++) {
+                if(buffer[0] == (clientlist[i]).ID << 4 | 0x01) {
+                    clientlist[i].connected = 0x01;
+                }
             }
         }
 
@@ -107,24 +104,19 @@ int main() {
 
         // Start roundtrip measurement       
         msg[0] = 0x01;
-        while (c1.ack == 0x00) //|| c2.ack == 0x00 || c3.ack == 0x00) //TODO: uncomment
+        while (clientlist[0].ack == 0x00) //|| c2.ack == 0x00 || c3.ack == 0x00) //TODO: uncomment
         {
             gettimeofday(&t1, NULL);
             sendto(sockfd, (const char *)msg, SEND_BUFF_SIZE, MSG_CONFIRM, (const struct sockaddr *) &cliaddr, len);
             n = recvfrom(sockfd, (char *)buffer, REC_BUFF_SIZE, MSG_WAITALL, ( struct sockaddr *) &cliaddr, &len);
             gettimeofday(&t2, NULL);
             printf("test %s\n", buffer);
-            if (buffer[0] == c1.ID << 4 | 0x02) {
-                c1.round_time = (t2.tv_sec * 1E6 + t2.tv_usec) - (t1.tv_sec * 1E6 + t1.tv_usec);
-                c1.ack = 0x01;
-            }
-            else if (buffer[0] == c2.ID << 4 | 0x02) {
-                c2.round_time = (t2.tv_sec * 1E6 + t2.tv_usec) - (t1.tv_sec * 1E6 + t1.tv_usec);
-                c2.ack = 0x01;
-            }
-            else if (buffer[0] == c3.ID << 4 | 0x02) {
-                c3.round_time = (t2.tv_sec * 1E6 + t2.tv_usec) - (t1.tv_sec * 1E6 + t1.tv_usec);
-                c3.ack = 0x01;
+
+            for (int i = 0; i < CLIENTCNT; i++) {
+                if (buffer[0] == clientlist[i].ID << 4 | 0x02) {
+                    clientlist[i].round_time = (t2.tv_sec * 1E6 + t2.tv_usec) - (t1.tv_sec * 1E6 + t1.tv_usec);
+                    clientlist[i].ack = 0x01;
+                }
             }
 
             // Add delay to avoid receiving old messages from other clients in next loop- cycle??
@@ -144,15 +136,33 @@ int main() {
 
         // If received -> Calc results; if not -> Display error
         //float speedOfSound = 343.2; // 343.2 m/s
-        while(1) {//(c1.time_diff != 0) { // || c2.time_diff != 0 || c3.time_diff != 0
+        while(clientlist[0].time_diff_flag != 0) {//(c1.time_diff != 0) { // || c2.time_diff != 0 || c3.time_diff != 0
+
             n = recvfrom(sockfd, (char *)buffer, REC_BUFF_SIZE, MSG_WAITALL, ( struct sockaddr *) &cliaddr, &len);
-            for (int i = 0; i < REC_BUFF_SIZE; i++) {
-                printf("%d: %02x\n", i, buffer[i]);
+
+            for (int i = 0; i < CLIENTCNT; i++) {
+
+                if (buffer[0] == clientlist[i].ID) {
+
+                    for (int i = 1; i < REC_BUFF_SIZE; i++) {
+                        clientlist[i].time_diff << (REC_BUFF_SIZE-i);
+                    }
+                }
+
+                printf("Time difference of client %d is: %d\n", clientlist[i].ID, clientlist[i].time_diff);
             }
-            printf("time difference of client %d is %s\n", c1.ID, buffer);
+
         }
 
-        c1.time_diff = 0;
+        // calc results
+
+        // print results
+
+        // reset time_diff_flag & time_diff for next loop cycle
+        for (int i = 0; i < REC_BUFF_SIZE; i++) {
+            clientlist[i].time_diff_flag = 0x00;
+            clientlist[i].time_diff = 0x00;
+        }
     }
     
     return 0;
